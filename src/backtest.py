@@ -13,6 +13,7 @@ If you don't have historical files, the module provides functions you can call p
 
 import argparse
 import json
+import os
 from typing import Optional
 
 import numpy as np
@@ -20,6 +21,8 @@ import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
+
+from src.odds_fetcher import fetch_odds_from_api, load_odds_csv
 
 
 def load_joined_data(projections_path: str, results_path: Optional[str] = None) -> pd.DataFrame:
@@ -142,9 +145,6 @@ def simulate_betting(df: pd.DataFrame, prob_col: str, odds_col: str, side: str =
 
     bets['stake'] = stake
     # profit per bet
-    bets['profit'] = bets.apply(lambda r: (r[odds_col] - 1) * r['stake'] if r[prob_col] == r['actual'] and r['actual'] == 1 else ((-1) * r['stake'] if r['actual'] == 0 else ((r[odds_col] - 1) * r['stake'] if r['actual']==1 else -r['stake'])), axis=1)
-    # The lambda above is generic but we assume target event is actual==1 meaning the predicted event happened
-    # Simpler: if actual==1 profit = (odds-1)*stake else -stake. We'll use that.
     bets['profit'] = bets.apply(lambda r: (r[odds_col] - 1) * r['stake'] if r['actual'] == 1 else -r['stake'], axis=1)
 
     total_profit = float(bets['profit'].sum())
@@ -169,12 +169,37 @@ def main(args):
         print('After isotonic - Brier:', metrics_cal.get('brier'))
 
     # If odds provided, load and run a simple EV simulation
-    if args.odds:
-        odds = pd.read_csv(args.odds)
-        # expect odds.csv to have game_id and decimal odds for home in column home_odds
-        merged = df.merge(odds[['game_id', 'home_odds']], on='game_id', how='left')
-        results = simulate_betting(merged, prob_col='pred_prob', odds_col='home_odds', stake=1.0, min_ev=args.min_ev)
-        print('Betting simulation:', results['n_bets'], 'bets => profit:', results['total_profit'], 'ROI:', results['roi'])
+    odds_df = None
+    if args.fetch_odds:
+        try:
+            print('Fetching odds from API...')
+            odds_df = fetch_odds_from_api()
+            print(f'Fetched {len(odds_df)} odds events')
+        except Exception as e:
+            print('Failed to fetch odds from API:', e)
+            odds_df = None
+
+    if args.odds and odds_df is None:
+        odds_df = load_odds_csv(args.odds)
+
+    if odds_df is not None:
+        # merge on team names (fallback to generated game_id)
+        # ensure projections have home_team and away_team columns or game_id
+        merged = None
+        if 'home_team' in df.columns and 'away_team' in df.columns:
+            merged = df.merge(odds_df, how='left', left_on=['away_team', 'home_team'], right_on=['away_team', 'home_team'])
+        else:
+            # merge by generated game_id
+            odds_df['game_id'] = odds_df['away_team'].astype(str) + '_vs_' + odds_df['home_team'].astype(str)
+            merged = df.merge(odds_df[['game_id', 'home_odds']], on='game_id', how='left')
+
+        if merged is not None:
+            # simulate betting on home team by default
+            try:
+                results = simulate_betting(merged, prob_col='pred_prob', odds_col='home_odds', stake=1.0, min_ev=args.min_ev)
+                print('Betting simulation:', results['n_bets'], 'bets => profit:', results['total_profit'], 'ROI:', results['roi'])
+            except Exception as e:
+                print('Betting simulation failed:', e)
 
 
 if __name__ == '__main__':
@@ -184,5 +209,6 @@ if __name__ == '__main__':
     parser.add_argument('--odds', required=False)
     parser.add_argument('--min_ev', type=float, default=0.01)
     parser.add_argument('--do_recalibrate', action='store_true')
+    parser.add_argument('--fetch_odds', action='store_true', help='Fetch odds from configured API (ODDS_API_KEY env required)')
     args = parser.parse_args()
     main(args)

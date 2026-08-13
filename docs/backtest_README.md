@@ -12,9 +12,15 @@ Usage examples:
 
     python src/backtest.py --projections data/projections.csv --results data/historical_results.csv --odds data/odds.csv --min_ev 0.02
 
-Files added:
-- src/backtest.py: main harness for calibration & betting simulation
-- src/odds_fetcher.py: helpers to read/normalize odds data
+3) Fetch odds from The Odds API (requires ODDS_API_KEY set in environment/secrets):
+
+    python src/backtest.py --projections data/projections.csv --results data/historical_results.csv --fetch_odds
+
+Files added/updated:
+- src/backtest.py: main harness for calibration & betting simulation (now supports fetching odds from The Odds API)
+- src/odds_fetcher.py: helpers to read/normalize odds data and fetch from The Odds API
+- docs/backtest_README.md: usage notes
+- tests/test_backtest_basic.py: basic unit test
 
 Notes:
 - Odds CSV expected columns: game_id, home_odds (decimal). If using american odds, use columns home_american/away_american.
