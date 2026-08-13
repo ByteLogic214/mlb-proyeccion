@@ -4,6 +4,7 @@ import requests
 import pandas as pd
 from datetime import datetime
 
+# Garantizar resolución de módulos locales
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from data_fetcher import MLBDataFetcher
@@ -19,10 +20,10 @@ class MLBOrchestrator:
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
 
-    def send_telegram_message(self, message):
+    def send_telegram_message(self, message: str) -> bool:
         """Send formatted message via Telegram bot"""
         if not self.telegram_token or not self.telegram_chat_id:
-            print("Warning: Telegram credentials not configured.")
+            print("⚠️ Warning: Telegram credentials not configured.")
             return False
             
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
@@ -41,7 +42,7 @@ class MLBOrchestrator:
             print(f"❌ Failed to send Telegram message: {e}")
             return False
 
-    def format_projections_message(self, df):
+    def format_projections_message(self, df: pd.DataFrame) -> str:
         """Format projections into human-readable Telegram message"""
         if df is None or df.empty:
             return "⚾ *MLB Update*\nNo games scheduled for today. 🧢"
@@ -51,36 +52,49 @@ class MLBOrchestrator:
         message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
         for idx, row in df.iterrows():
-            # Matchup header
-            message += f"🏟️ *Game {idx + 1}: {row.get('away_team', 'TBD')} @ {row.get('home_team', 'TBD')}*\n"
+            away_team = row.get('away_team', 'TBD')
+            home_team = row.get('home_team', 'TBD')
+            message += f"🏟️ *Game {idx + 1}: {away_team} @ {home_team}*\n"
             
-            # Pitcher information with ratings
-            away_sp = row.get('away_sp', 'TBD')
-            home_sp = row.get('home_sp', 'TBD')
-            away_rating = row.get('away_sp_rating', 'N/A')
-            home_rating = row.get('home_sp_rating', 'N/A')
-            message += f"🥎 *Pitchers:* {away_sp} ({away_rating}) vs {home_sp} ({home_rating})\n"
+            away_sp = row.get('away_sp_name', row.get('away_sp', 'TBD'))
+            home_sp = row.get('home_sp_name', row.get('home_sp', 'TBD'))
             
-            # Team ratings
-            away_off = row.get('away_offense_rating', 'N/A')
-            away_def = row.get('away_defense_rating', 'N/A')
-            home_off = row.get('home_offense_rating', 'N/A')
-            home_def = row.get('home_defense_rating', 'N/A')
+            away_era = row.get('away_sp_era', 'N/A')
+            home_era = row.get('home_sp_era', 'N/A')
+            
+            away_rating_str = f"ERA: {away_era:.2f}" if isinstance(away_era, (int, float)) and not pd.isna(away_era) else "N/A"
+            home_rating_str = f"ERA: {home_era:.2f}" if isinstance(home_era, (int, float)) and not pd.isna(home_era) else "N/A"
+            
+            message += f"🥎 *Pitchers:* {away_sp} ({away_rating_str}) vs {home_sp} ({home_rating_str})\n"
+            
+            away_off = row.get('away_offense_rating', 100.0)
+            away_def = row.get('away_defense_rating', 100.0)
+            home_off = row.get('home_offense_rating', 100.0)
+            home_def = row.get('home_defense_rating', 100.0)
+            
             message += f"⚔️ *Ratings:* OFF/DEF\n"
-            message += f"   • {row.get('away_team', 'TBD')}: {away_off}/{away_def}\n"
-            message += f"   • {row.get('home_team', 'TBD')}: {home_off}/{home_def}\n"
+            message += f"   • {away_team}: {away_off:.1f}/{away_def:.1f}\n"
+            message += f"   • {home_team}: {home_off:.1f}/{home_def:.1f}\n"
             
-            # Win probabilities
-            away_prob = round(row.get('prob_away_win', 0) * 100)
-            home_prob = round(row.get('prob_home_win', 0) * 100)
+            away_prob = round(float(row.get('prob_away_win', 0.50)) * 100)
+            home_prob = round(float(row.get('prob_home_win', 0.50)) * 100)
             message += f"🎯 *Win Probability:*\n"
-            message += f"   • {row.get('away_team', 'TBD')}: {away_prob}%\n"
-            message += f"   • {row.get('home_team', 'TBD')}: {home_prob}%\n"
+            message += f"   • {away_team}: {away_prob}%\n"
+            message += f"   • {home_team}: {home_prob}%\n"
             
-            # Projected total
             total = row.get('projected_total', 'N/A')
+            if isinstance(total, (int, float)) and not pd.isna(total):
+                total_str = f"{total:.1f}"
+            else:
+                total_str = str(total)
+                
             confidence = row.get('confidence', 'N/A')
-            message += f"📊 *Total Runs:* {total} (Confidence: {confidence})\n"
+            if isinstance(confidence, (int, float)) and not pd.isna(confidence):
+                conf_str = f"{confidence:.2f}"
+            else:
+                conf_str = str(confidence)
+
+            message += f"📊 *Total Runs:* {total_str} (Confidence: {conf_str})\n"
             message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
         message += "🔬 *Advanced projection system using:*\n"
@@ -98,7 +112,6 @@ class MLBOrchestrator:
         print("🚀 MLB Projection Pipeline Started")
         print("="*50 + "\n")
         
-        # Step 1: Fetch data
         print("📥 Step 1: Fetching game data from MLB StatsAPI...")
         fetcher = MLBDataFetcher()
         raw_data = fetcher.fetch_today_schedule()
@@ -110,10 +123,15 @@ class MLBOrchestrator:
         
         print(f"✅ Successfully fetched {len(raw_data)} games\n")
         
-        # Step 2: Generate projections
         print("🧮 Step 2: Generating advanced projections...")
         projector = MLBProjector()
-        projections_df = projector.run_projections()
+        
+        if hasattr(projector, 'run_projections'):
+            projections_df = projector.run_projections()
+        elif hasattr(projector, 'predict'):
+            projections_df = projector.predict(raw_data)
+        else:
+            projections_df = raw_data
         
         if projections_df is None or projections_df.empty:
             print("\n⚠️ Projection generation failed.")
@@ -122,17 +140,12 @@ class MLBOrchestrator:
         
         print(f"✅ Generated projections for {len(projections_df)} games\n")
         
-        # Step 3: Format and send results
         print("📤 Step 3: Formatting and sending results...")
         final_message = self.format_projections_message(projections_df)
         
-        # Print to console
         print("\n" + final_message + "\n")
-        
-        # Send via Telegram
         self.send_telegram_message(final_message)
         
-        # Save detailed results
         projections_df.to_csv(os.path.join(self.data_dir, 'projections.csv'), index=False)
         print(f"💾 Detailed projections saved to {self.data_dir}/projections.csv")
         
