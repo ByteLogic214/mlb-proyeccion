@@ -198,6 +198,21 @@ def main(args):
             try:
                 results = simulate_betting(merged, prob_col='pred_prob', odds_col='home_odds', stake=1.0, min_ev=args.min_ev)
                 print('Betting simulation:', results['n_bets'], 'bets => profit:', results['total_profit'], 'ROI:', results['roi'])
+
+                # Save results and details automatically
+                out_dir = 'data'
+                os.makedirs(out_dir, exist_ok=True)
+                summary_path = os.path.join(out_dir, 'backtest_summary.csv')
+                details_path = os.path.join(out_dir, 'backtest_bets.csv')
+                summary = pd.DataFrame([{
+                    'n_bets': results['n_bets'],
+                    'total_profit': results['total_profit'],
+                    'roi': results['roi']
+                }])
+                summary.to_csv(summary_path, index=False)
+                results['details'].to_csv(details_path, index=False)
+                print(f'Backtest results saved to {summary_path} and {details_path}')
+
             except Exception as e:
                 print('Betting simulation failed:', e)
 
