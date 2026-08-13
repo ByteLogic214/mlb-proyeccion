@@ -127,7 +127,7 @@ class MLBDataFetcher:
             if best_pitcher and best_starts > 0:
                 return best_pitcher
         except Exception as e:
-            print(f"⚠️ Warning: Could not find starter for team {team_id}: {e}") me
+            print(f"⚠️ Warning: Could not find starter for team {team_id}: {e}")
         
         return None
 
@@ -258,7 +258,7 @@ class MLBDataFetcher:
             
         return recent_stats
 
-    def fetch_today_schedule(() -> pd.DataFrame:
+    def fetch_today_schedule(self) -> pd.DataFrame:
         """Fetch today's MLB schedule with comprehensive statistics"""
         today_str = datetime.now().strftime('%Y-%m-%d')
         print(f"\n📅 Fetching schedule for: {today_str}\n")
