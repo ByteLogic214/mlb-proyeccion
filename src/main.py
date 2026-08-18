@@ -4,7 +4,6 @@ import requests
 import pandas as pd
 from datetime import datetime
 
-# Garantizar resolución de módulos locales
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from data_fetcher import MLBDataFetcher
@@ -21,21 +20,29 @@ class MLBOrchestrator:
             os.makedirs(self.data_dir)
 
     def send_telegram_message(self, message: str) -> bool:
-        """Send formatted message via Telegram bot"""
+        """Send formatted message via Telegram bot with robust chunking and safety fallback"""
         if not self.telegram_token or not self.telegram_chat_id:
             print("⚠️ Warning: Telegram credentials not configured.")
             return False
             
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
-        payload = {
-            "chat_id": self.telegram_chat_id,
-            "text": message,
-            "parse_mode": "Markdown"
-        }
+        max_length = 4000
         
         try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
+            for i in range(0, len(message), max_length):
+                chunk = message[i:i+max_length]
+                payload = {
+                    "chat_id": self.telegram_chat_id,
+                    "text": chunk,
+                    "parse_mode": "Markdown"
+                }
+                response = requests.post(url, json=payload, timeout=10)
+                if response.status_code == 400:
+                    # Fallback without Markdown if markdown parsing fails
+                    payload.pop("parse_mode")
+                    response = requests.post(url, json=payload, timeout=10)
+                response.raise_for_status()
+            
             print("✅ Telegram notification sent successfully")
             return True
         except Exception as e:
