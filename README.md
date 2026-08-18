@@ -5,10 +5,12 @@ Advanced MLB game projection system powered by comprehensive statistical analysi
 ## Features 🚀
 
 - **Multi-Factor Analysis**: Combines pitcher efficiency, team offense/defense ratings, and recent performance
-- **Intelligent Park Factors**: Stadium-specific run adjustment for all 30 MLB parks
+- **Log5 Win Probability**: Bill James log5 model combining team strength AND starting pitcher quality, with home field advantage
+- **Real Park Factors**: Calibrated multi-season park factors keyed to real MLB StatsAPI venue IDs
 - **Confidence Scoring**: Assesses projection reliability based on data completeness
 - **Real-time Data**: Fetches live statistics from MLB Official StatsAPI
 - **Telegram Integration**: Daily automated projections delivered via Telegram bot
+- **Backtesting**: Calibration metrics (Brier, LogLoss, Accuracy), Platt/isotonic recalibration, and EV betting simulation
 
 ## System Architecture 🏗️
 
@@ -30,25 +32,30 @@ Fetches comprehensive MLB data:
 - Retry logic and robust error handling
 
 #### 2. **predictor.py** 🧮
-Advanced projection engine with:
-- **Pitcher Rating System** (0-100 scale):
-  - ERA normalized vs league average
-  - WHIP efficiency
-  - Strikeout-to-Walk ratio
+Advanced projection engine (v2) with:
+- **Pitcher Rating** (0-100, league average = 50):
+  - ERA and WHIP vs league average
+  - K-BB (strikeout minus walk rate)
   - Quality starts percentage
-- **Offense Rating** (0-100 scale):
+- **Offense Rating** (0-100, league average = 50):
   - Batting average, OBP, SLG
   - Recent runs per game
-- **Defense Rating** (0-100 scale):
+- **Defense Rating** (0-100, league average = 50):
   - Team ERA and WHIP
-- **Win Probability**: Logistic regression model with home field advantage
-- **Total Runs Projection**: Park factors + pitcher efficiency + team offense metrics
+- **Win Probability**: log5 model on team+pitcher expected win%, with home field advantage (~54%)
+- **Total Runs Projection**: per-team expected runs from offense × opposing starter × opposing defense × park factor
 
 #### 3. **main.py** 🎯
 Orchestration and notification:
 - Pipeline coordination
 - Telegram message formatting
 - Results persistence
+
+#### 4. **backtest.py** 📈
+Evaluation harness:
+- Calibration metrics: Brier score, LogLoss, Accuracy, reliability table
+- Recalibration: Platt scaling and isotonic regression
+- EV-based betting simulation against decimal odds
 
 ## Installation 🛠️
 
@@ -76,6 +83,12 @@ python src/data_fetcher.py
 
 # Run just projections
 python src/predictor.py
+
+# Backtest against historical results
+python src/backtest.py --projections data/projections.csv --results data/historical_results.csv
+
+# Run tests
+pytest tests/
 ```
 
 ## Output Format 📤
@@ -94,23 +107,33 @@ Formatted projections with:
 
 ## Algorithm Details 🔬
 
+### Rating System (v2)
+All ratings live on a **0-100 scale centered at 50** (league average), with ~15 points per standard deviation. (The previous version centered at 100 and clipped half the scale.)
+
 ### Win Probability Calculation
-1. Calculate individual ratings for each team's offense/defense
-2. Compute combined strength: (Offense × 0.45) + (Defense × 0.55)
-3. Apply logistic function to strength differential
-4. Add home field advantage (~3.5%)
-5. Clip probability to [0.1, 0.9] range
+1. Estimate each team's expected win% vs an average opponent:
+   - Team strength: (Offense × 0.45) + (Defense × 0.55), mapped to win% (±0.07 std)
+   - Starter adjustment: ±0.003 win% per rating point above/below 50
+2. Combine both win% via **log5** (Bill James): P(H beats A) = (H − H·A) / (H + A − 2·H·A)
+3. Apply home field advantage in logit space (~54% historical home win rate)
+4. Clip probability to [0.20, 0.80] (realistic MLB moneyline range)
+
+(The previous version ignored starting pitchers entirely in win probability.)
 
 ### Total Runs Projection
-1. Start with league average (8.8 runs)
-2. Apply park factor (0.95-1.15 range)
-3. Adjust by pitcher quality metrics
-4. Scale by average offensive rating
-5. Ensure result in [4.0, 15.0] range
+1. League average base: 8.8 runs per game (4.4 per team)
+2. Each team's expected runs = base × park factor × offense factor × opposing starter factor × opposing defense factor
+3. Better starters/defenses **reduce** runs (direction bug fixed in v2)
+4. Home team gets a small ~3% batting boost
+5. Clip result to [5.5, 13.5]
+
+### Park Factors
+Keyed to **real MLB StatsAPI venue IDs** (e.g. Coors Field = 19, Yankee Stadium = 3313), with calibrated multi-season values (0.90 pitcher-friendly T-Mobile/Oracle to 1.32 Coors Field). Unknown venues fall back to 1.00. (The previous version used incorrect venue IDs, so almost every game silently fell back to 1.00.)
 
 ### Confidence Scoring
 - Penalized if pitcher stats missing (-15%)
 - Penalized if team stats missing (-10%)
+- Penalized if starter unresolved / bullpen day (-10% per side)
 - Maximum confidence: 1.0 (100%)
 
 ## League Averages (2024 MLB) 📈
@@ -125,12 +148,6 @@ Formatted projections with:
 | OBP | 0.314 |
 | SLG | 0.390 |
 | Runs Per Game | 8.8 |
-
-## Park Factors 🏟️
-
-Included for all 30 MLB stadiums (0.95-1.15 range):
-- Higher factors = hitter-friendly parks (Colorado, Kansas City, Miami)
-- Lower factors = pitcher-friendly parks (Fenway, Nationals Park)
 
 ## Dependencies 📦
 
@@ -148,7 +165,7 @@ xgboost==2.0.3
 - [ ] Head-to-head historical matchup data
 - [ ] Weather impact analysis
 - [ ] Injury report integration
-- [ ] Model performance backtesting
+- [x] Model performance backtesting (Brier/LogLoss/Accuracy + recalibration)
 - [ ] Multiple projection algorithms ensemble
 - [ ] Live in-game probability updates
 
@@ -160,18 +177,15 @@ xgboost==2.0.3
 - Timeout protection (10s per request)
 - Data validation before processing
 
-## Precision Improvements (This Update) 📊
+## Precision Improvements (Model v2) 📊
 
-✅ Advanced multi-factor analysis instead of simple ERA comparison
-✅ Pitcher quality rating system incorporating 5+ metrics
-✅ Separate offensive and defensive team ratings
-✅ Complete park factor database for all 30 MLB stadiums
-✅ Recent performance trend integration (14-day lookback)
-✅ Home field advantage weighting (3.5%)
-✅ Confidence scoring for result reliability
-✅ Enhanced data fetching with retry logic
-✅ Comprehensive error handling and validation
-✅ Better message formatting with detailed metrics
+✅ Win probability now includes starting pitcher quality via log5 (was: ignored)
+✅ Ratings centered at 50 with full 0-100 range (was: centered at 100, half the scale clipped)
+✅ Park factors keyed to real StatsAPI venue IDs with calibrated values (was: wrong IDs → silent 1.00 fallback)
+✅ Total runs direction fixed: better pitching/defense reduces projected runs (was: inverted)
+✅ Realistic probability range [0.20, 0.80] and home edge calibrated to ~54%
+✅ Backtest import fixed (`python src/backtest.py` now works directly) + Accuracy metric added
+✅ 9 sanity tests locking in the model's directional properties
 
 ## License 📄
 
