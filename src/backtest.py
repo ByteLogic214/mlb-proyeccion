@@ -1,7 +1,7 @@
 """
 Backtesting harness for MLB projections.
 - Loads projections and results
-- Computes calibration metrics (Brier, LogLoss)
+- Computes calibration metrics (Brier, LogLoss, Accuracy)
 - Performs recalibration (Platt/Isotonic)
 - Simulates simple betting strategies using odds (expected value)
 
@@ -14,6 +14,7 @@ If you don't have historical files, the module provides functions you can call p
 import argparse
 import json
 import os
+import sys
 from typing import Optional
 
 import numpy as np
@@ -22,7 +23,13 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
 
-from src.odds_fetcher import fetch_odds_from_api, load_odds_csv
+# Import robusto: funciona tanto como `python src/backtest.py` (script directo)
+# como `python -m src.backtest` (módulo de paquete).
+try:
+    from src.odds_fetcher import fetch_odds_from_api, load_odds_csv
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from odds_fetcher import fetch_odds_from_api, load_odds_csv
 
 
 def load_joined_data(projections_path: str, results_path: Optional[str] = None) -> pd.DataFrame:
@@ -66,9 +73,9 @@ def load_joined_data(projections_path: str, results_path: Optional[str] = None) 
 
 
 def evaluate_calibration(df: pd.DataFrame, prob_col: str = 'pred_prob', actual_col: str = 'actual') -> dict:
-    """Return calibration metrics: Brier and LogLoss and simple reliability table."""
+    """Return calibration metrics: Brier, LogLoss, Accuracy and reliability table."""
     mask = df[prob_col].notna() & df[actual_col].notna()
-    sub = df.loc[mask]
+    sub = df.loc[mask].copy()
     if sub.empty:
         return {}
 
@@ -78,12 +85,18 @@ def evaluate_calibration(df: pd.DataFrame, prob_col: str = 'pred_prob', actual_c
     probs = np.clip(sub[prob_col].astype(float), eps, 1 - eps)
     ll = float(log_loss(sub[actual_col], probs))
 
+    # accuracy at the 0.5 decision threshold
+    pred_label = (sub[prob_col].astype(float) >= 0.5).astype(int)
+    accuracy = float((pred_label == sub[actual_col].astype(int)).mean())
+
     # reliability: bucket by deciles
     sub['_bucket'] = pd.qcut(sub[prob_col], q=10, duplicates='drop')
-    reliability = sub.groupby('_bucket').apply(lambda g: pd.Series({'mean_pred': g[prob_col].mean(), 'empirical': g[actual_col].mean(), 'count': len(g)}))
+    reliability = sub.groupby('_bucket', observed=True).apply(
+        lambda g: pd.Series({'mean_pred': g[prob_col].mean(), 'empirical': g[actual_col].mean(), 'count': len(g)})
+    )
     reliability = reliability.reset_index()
 
-    return {'brier': brier, 'logloss': ll, 'reliability': reliability}
+    return {'brier': brier, 'logloss': ll, 'accuracy': accuracy, 'reliability': reliability}
 
 
 def platt_recalibrate(train_df: pd.DataFrame, prob_col: str = 'pred_prob', actual_col: str = 'actual'):
@@ -160,6 +173,7 @@ def main(args):
     metrics = evaluate_calibration(df)
     print('Brier:', metrics.get('brier'))
     print('LogLoss:', metrics.get('logloss'))
+    print('Accuracy:', metrics.get('accuracy'))
 
     # Example: fit isotonic on the full set and apply
     if args.do_recalibrate:
