@@ -176,7 +176,7 @@ class MLBDataFetcher:
         return None, "Bullpen Day", bullpen_stats, method
 
     def get_team_stats(self, team_id: Optional[int]) -> Dict:
-        """Extract team batting and pitching statistics"""
+        """Extract team batting and pitching statistics with proper seasonal parameters"""
         team_stats = {
             "team_era": 4.10, "team_whip": 1.25,
             "team_avg": .248, "team_obp": .318, "team_slg": .410
@@ -188,7 +188,8 @@ class MLBDataFetcher:
             pitching_data = self._get_json(f"teams/{team_id}/stats", {
                 "stats": "season",
                 "group": "pitching", 
-                "season": self.current_season
+                "season": self.current_season,
+                "gameType": "R"
             })
             
             if pitching_data and 'stats' in pitching_data:
@@ -203,7 +204,8 @@ class MLBDataFetcher:
             batting_data = self._get_json(f"teams/{team_id}/stats", {
                 "stats": "season",
                 "group": "batting",
-                "season": self.current_season
+                "season": self.current_season,
+                "gameType": "R"
             })
             
             if batting_data and 'stats' in batting_data:
